@@ -1,0 +1,15 @@
+1. Copy .env.example to .env. Keep PI_WEB_BACKEND_IMAGE unchanged and set
+   PI_WEB_CORS_ORIGINS to the exact Tomcat origin.
+2. Make runtime/pi-agent and runtime/user-data writable by container UID 1000.
+3. Run: docker load -i pi-agent-backend-<version>.tar
+4. Run: docker compose up -d
+   If the Docker Compose plugin is unavailable, run: sh run-backend.sh
+5. Copy ROOT.war to Tomcat webapps and restart Tomcat.
+6. Check: curl http://127.0.0.1:30142/api/health
+
+The server does not need Node.js, npm or Git. npm was used on the build machine;
+the backend runs with Node.js inside its Docker image.
+
+For a later backend-only update, load the new pi-agent-backend-<version>.tar,
+change PI_WEB_BACKEND_IMAGE in .env to the matching image tag, and run:
+docker compose up -d --force-recreate backend

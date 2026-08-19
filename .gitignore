@@ -1,0 +1,30 @@
+node_modules/
+.next/
+out/
+dist/
+*.war
+*.tsbuildinfo
+.DS_Store
+.env
+runtime/*
+!runtime/README.md
+!runtime/pi-agent/
+runtime/pi-agent/*
+!runtime/pi-agent/README.md
+!runtime/user-data/
+runtime/user-data/*
+!runtime/user-data/README.md
+extensions/python_sandbox/*
+!extensions/python_sandbox/README.md
+
+# Release archives
+*.tar
+*.tar.gz
+
+#Logs and test output
+*.log
+coverage/
+
+#Local env files
+.env.*
+!.env.example

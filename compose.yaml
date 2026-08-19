@@ -1,0 +1,40 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    image: "${PI_WEB_BACKEND_IMAGE:-pi-web-separated-backend:0.1.0}"
+    restart: unless-stopped
+    ports:
+      - "${PI_WEB_BACKEND_PORT:-30142}:30142"
+    environment:
+      PORT: "30142"
+      HOSTNAME: "0.0.0.0"
+      PI_CODING_AGENT_DIR: "/data/pi-agent"
+      PI_WEB_USER_DATA_ROOT: "/data/users"
+      PI_WEB_FIXED_USER_ID: "${PI_WEB_FIXED_USER_ID:-user1}"
+      PI_WEB_CORS_ORIGINS: "${PI_WEB_CORS_ORIGINS:-http://localhost:8080,http://127.0.0.1:8080}"
+      PI_WEB_RICH_OUTPUT: "${PI_WEB_RICH_OUTPUT:-1}"
+      PI_WEB_AUTO_PUBLISH: "${PI_WEB_AUTO_PUBLISH:-1}"
+      HTTP_PROXY: "${HTTP_PROXY:-}"
+      HTTPS_PROXY: "${HTTPS_PROXY:-}"
+      NO_PROXY: "${NO_PROXY:-localhost,127.0.0.1}"
+      RAG_API_URL: "${RAG_API_URL:-}"
+      RAG_API_KEY: "${RAG_API_KEY:-}"
+    volumes:
+      - ./runtime/pi-agent:/data/pi-agent
+      - ./runtime/user-data:/data/users
+      - ./extensions/python_sandbox:/data/pi-agent/extensions/python_sandbox:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=512m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:30142/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
