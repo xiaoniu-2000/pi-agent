@@ -284,7 +284,9 @@ function PiWebTitle() {
   const [scrambling, setScrambling] = useState(false);
   const revertTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const target = showVersion ? `${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}p${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "气象分析Agent";
+  const target = showVersion
+    ? `v${process.env.NEXT_PUBLIC_APP_VERSION ?? "0.0.0"}`
+    : "数据智能体";
   const display = useScramble(target, scrambling);
 
   const triggerScramble = useCallback((toVersion: boolean) => {
@@ -309,15 +311,30 @@ function PiWebTitle() {
   return (
     <button
       onClick={handleClick}
+      title={showVersion ? `Pi v${process.env.NEXT_PUBLIC_PI_VERSION ?? "0.0.0"}` : "查看版本"}
       style={{
-        background: "none", border: "none", padding: 0, cursor: "default",
-        fontWeight: 700, fontSize: 15, letterSpacing: "-0.01em",
+        display: "flex", alignItems: "center", gap: 9,
+        minWidth: 0, background: "none", border: "none", padding: 0, cursor: "pointer",
+        fontWeight: 650, fontSize: 14, letterSpacing: "-0.02em",
         color: showVersion ? "var(--accent)" : "var(--text)",
-        fontFamily: "var(--font-mono)",
-        minWidth: "6ch",
+        fontFamily: "inherit",
       }}
     >
-      {display}
+      <span
+        aria-hidden="true"
+        style={{
+          width: 28, height: 28, display: "grid", placeItems: "center", flexShrink: 0,
+          borderRadius: 9, background: "var(--text)", color: "var(--bg)",
+          boxShadow: "0 1px 2px rgba(20,20,18,0.12)",
+        }}
+      >
+        <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M10 2.5v3M10 14.5v3M2.5 10h3M14.5 10h3" />
+          <path d="M4.7 4.7 6.8 6.8M13.2 13.2l2.1 2.1M15.3 4.7l-2.1 2.1M6.8 13.2l-2.1 2.1" />
+          <circle cx="10" cy="10" r="2.7" />
+        </svg>
+      </span>
+      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{display}</span>
     </button>
   );
 }
@@ -791,7 +808,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
   const sessionTree = buildSessionTree(filteredSessions);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
+    <div className="sidebar-root" style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden" }}>
       {customPathOpen && !managedSessions && (
         <DirectoryPicker
           busy={customPathValidating}
@@ -805,28 +822,30 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       )}
       {/* Header */}
       <div
+        className="sidebar-header"
         style={{
           padding: "12px 10px 10px",
           borderBottom: "1px solid var(--border)",
           flexShrink: 0,
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+        <div className="sidebar-title-row" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: managedSessions === true ? 0 : 10 }}>
           <PiWebTitle />
           <div style={{ display: "flex", gap: 6 }}>
             <button
+              className="sidebar-primary-action"
               onClick={() => { void handleNewSession(); }}
               disabled={!managedSessions && !selectedCwd}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                background: "var(--bg-hover)",
-                border: "1px solid var(--border)",
-                color: managedSessions || selectedCwd ? "var(--text-muted)" : "var(--text-dim)",
+                background: managedSessions || selectedCwd ? "var(--text)" : "var(--bg-selected)",
+                border: "1px solid transparent",
+                color: managedSessions || selectedCwd ? "var(--bg)" : "var(--text-dim)",
                 cursor: managedSessions || selectedCwd ? "pointer" : "not-allowed",
                 height: 32,
                 paddingLeft: 10,
                 paddingRight: 12,
-                borderRadius: 7,
+                borderRadius: 9,
                 fontSize: 12,
                 fontWeight: 500,
                 letterSpacing: "-0.01em",
@@ -836,14 +855,10 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               title={managedSessions ? "New session" : selectedCwd ? `New session in ${selectedCwd}` : "Select a project first"}
               onMouseEnter={(e) => {
                 if (!managedSessions && !selectedCwd) return;
-                e.currentTarget.style.background = "var(--bg-selected)";
-                e.currentTarget.style.color = "var(--accent)";
-                e.currentTarget.style.borderColor = "rgba(37,99,235,0.35)";
+                e.currentTarget.style.opacity = "0.82";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.background = "var(--bg-hover)";
-                e.currentTarget.style.color = managedSessions || selectedCwd ? "var(--text-muted)" : "var(--text-dim)";
-                e.currentTarget.style.borderColor = "var(--border)";
+                e.currentTarget.style.opacity = "1";
               }}
             >
               <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
@@ -853,6 +868,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               New
             </button>
             <button
+              className="sidebar-icon-action"
               onClick={() => loadSessions(false)}
               style={{
                 display: "flex", alignItems: "center", justifyContent: "center",
@@ -894,7 +910,9 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
           </div>
         </div>
 
-        {/* CWD picker */}
+        {/* Managed sessions own their workspace and cannot switch it here. Keep
+            this picker only for local/unmanaged mode, where it is functional. */}
+        {managedSessions === false && (
         <div ref={dropdownRef} style={{ position: "relative" }}>
           <button
             onClick={() => setDropdownOpen((v) => !v)}
@@ -1087,6 +1105,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
               </button>}
           </AnimatedDropdown>
         </div>
+        )}
 
         {/* Worktree switcher — shown only for git projects at a checkout top
             level (repo subdirs keep their own project identity, so switching
@@ -1407,7 +1426,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       </div>
 
       {/* Session list */}
-      <div style={{ flex: explorerOpen && (selectedCwdProp || selectedCwd) ? "1 1 0" : "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}>
+      <div className="sidebar-session-list" style={{ flex: explorerOpen && (selectedCwdProp || selectedCwd) ? "1 1 0" : "1 1 auto", overflowY: "auto", padding: "0", minHeight: 80 }}>
         {loading && (
           <div style={{ padding: "16px 14px", color: "var(--text-muted)", fontSize: 12 }}>
             Loading...
@@ -1446,6 +1465,7 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
       {/* File Explorer section */}
       {(selectedCwdProp || selectedCwd) && (
         <div
+          className="explorer-section"
           style={{
             borderTop: "1px solid var(--border)",
             display: "flex",
@@ -1455,15 +1475,16 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
             overflow: "hidden",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+          <div className="explorer-header" style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
             <button
               onClick={() => setExplorerOpen((v) => !v)}
               style={{
                 display: "flex",
-                alignItems: "center",
-                gap: 6,
+                flexDirection: "column",
+                alignItems: "stretch",
                 flex: 1,
-                padding: "6px 10px",
+                minWidth: 0,
+                padding: "5px 8px",
                 background: "none",
                 border: "none",
                 color: "var(--text-muted)",
@@ -1474,15 +1495,17 @@ export function SessionSidebar({ selectedSessionId, onSelectSession, onNewSessio
                 textTransform: "uppercase",
                 textAlign: "left",
               }}
-            >
-              <svg
-                width="9" height="9" viewBox="0 0 10 10" fill="none"
-                stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
-                style={{ transform: explorerOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}
               >
-                <polyline points="3 2 7 5 3 8" />
-              </svg>
-              Explorer
+                <span style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                <svg
+                  width="9" height="9" viewBox="0 0 10 10" fill="none"
+                  stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"
+                  style={{ transform: explorerOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s", flexShrink: 0 }}
+                >
+                  <polyline points="3 2 7 5 3 8" />
+                  </svg>
+                  <span>Explorer</span>
+                </span>
             </button>
             {explorerOpen && (
               <button
@@ -1790,6 +1813,7 @@ function SessionItem({
 
   return (
     <div
+      className="session-row"
       onClick={confirmDelete || renaming ? undefined : onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => { setHovered(false); }}
@@ -1797,15 +1821,16 @@ function SessionItem({
         height: ITEM_HEIGHT,
         display: "flex",
         alignItems: "center",
-        paddingLeft: depth > 0 ? depth * 12 + 14 : 14,
-        paddingRight: 8,
+        paddingLeft: depth > 0 ? depth * 12 + 12 : 12,
+        paddingRight: 7,
         cursor: confirmDelete || renaming ? "default" : "pointer",
         background: confirmDelete
           ? "rgba(239,68,68,0.06)"
           : isSelected ? "var(--bg-selected)" : hovered ? "var(--bg-hover)" : "transparent",
-        borderLeft: confirmDelete
-          ? "2px solid #ef4444"
-          : isSelected ? "2px solid var(--accent)" : "2px solid transparent",
+        border: confirmDelete
+          ? "1px solid rgba(239,68,68,0.28)"
+          : "1px solid transparent",
+        boxShadow: "none",
         transition: "background 0.1s",
         opacity: deleting ? 0.5 : 1,
         gap: 6,

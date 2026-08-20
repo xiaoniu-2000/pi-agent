@@ -18,7 +18,13 @@ export async function POST(
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
+    const sessionManager = SessionManager.open(filePath);
+    const existingTitle = sessionManager.getSessionName()?.trim();
+    if (existingTitle) {
+      return NextResponse.json({ title: existingTitle, usage: null, generated: false });
+    }
+
+    const cwd = sessionManager.getHeader()?.cwd ?? process.cwd();
     const existing = getRpcSession(id, user.id);
     const { session } = existing?.isAlive()
       ? { session: existing }
@@ -38,7 +44,7 @@ export async function POST(
 
     session.inner.setSessionName(result.title);
     invalidateSessionListCache(user.id);
-    return NextResponse.json({ title: result.title, usage: result.usage ?? null });
+    return NextResponse.json({ title: result.title, usage: result.usage ?? null, generated: true });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : String(error) },

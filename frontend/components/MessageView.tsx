@@ -182,12 +182,14 @@ function UserMessageView({ message, cwd, onOpenFile, entryId, onFork, forking, o
 
   return (
     <div
+      className="chat-message-user"
       style={{ marginBottom: 16, display: "flex", flexDirection: "column", alignItems: "flex-end" }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
-      <div style={{ display: "flex", alignItems: "flex-end", gap: 6, maxWidth: "85%" }}>
+      <div className="chat-message-user-row" style={{ display: "flex", alignItems: "flex-end", gap: 6, maxWidth: "min(82%, 680px)" }}>
         <div
+          className="chat-message-user-bubble"
           style={{
             flex: 1,
             minWidth: 0,
@@ -477,12 +479,14 @@ function AssistantMessageView({
 
   return (
     <div
+      className="chat-message-assistant"
       style={{ marginBottom: 16 }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
     >
       {/* Model label */}
       <div
+        className="assistant-model-label"
         style={{
           fontSize: 11,
           color: "var(--text-dim)",

@@ -3,7 +3,7 @@ import "katex/dist/katex.min.css";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "新能源气象智能分析 Agent",
+  title: "电力气象数据智能体",
   description: "新能源气象数据分析与智能报告平台",
   icons: {
     icon: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/Cepri.png`,

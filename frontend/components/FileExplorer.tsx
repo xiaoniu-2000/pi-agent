@@ -777,7 +777,7 @@ export const FileExplorer = forwardRef<FileExplorerHandle, Props>(function FileE
           ))
         )}
         {!loading && !error && roots.length === 0 && (
-          <div style={{ padding: "8px 12px", fontSize: 11, color: "var(--text-dim)" }}>
+          <div style={{ padding: "4px 12px", fontSize: 11, color: "var(--text-dim)" }}>
             No files found
           </div>
         )}
