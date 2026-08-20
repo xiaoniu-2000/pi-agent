@@ -21,12 +21,11 @@ case "$RELEASE_VERSION" in
     ;;
 esac
 
-if [ -z "${PI_WEB_API_BASE_URL:-}" ]; then
-  echo "PI_WEB_API_BASE_URL is required, for example http://10.10.10.21:30142" >&2
-  exit 1
+if [ -n "${PI_WEB_API_BASE_URL:-}" ]; then
+  PI_WEB_API_BASE_URL="$PI_WEB_API_BASE_URL" npm run build:war -w frontend
+else
+  npm run build:war -w frontend
 fi
-
-PI_WEB_API_BASE_URL="$PI_WEB_API_BASE_URL" npm run build:war -w frontend
 docker buildx build --platform "$TARGET_PLATFORM" --load -t "$IMAGE_NAME" backend
 
 rm -rf "$BUNDLE_DIR"

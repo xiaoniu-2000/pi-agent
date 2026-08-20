@@ -4,6 +4,7 @@ import { createAgentSessionServices, getAgentDir, type SettingsManager } from "@
 import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { loadModelsWithCache, withModelRuntimeError, type ModelsData } from "@/lib/models-cache";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -86,6 +87,7 @@ const EMPTY_MODELS: ModelsData = {
 };
 
 export async function GET(req: Request) {
+  const user = getRequestWebUser(req);
   const requestedCwd = new URL(req.url).searchParams.get("cwd") || process.cwd();
   const cwd = resolve(requestedCwd);
 
@@ -98,7 +100,7 @@ export async function GET(req: Request) {
   if (!cwdStat.isDirectory()) {
     return Response.json({ error: `Not a directory: ${cwd}` }, { status: 400 });
   }
-  const allowedRoots = await getAllowedFileRoots();
+  const allowedRoots = await getAllowedFileRoots(user.id);
   if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
     return Response.json({ error: "Access denied" }, { status: 403 });
   }

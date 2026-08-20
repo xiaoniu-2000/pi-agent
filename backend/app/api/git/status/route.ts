@@ -2,15 +2,17 @@ import fs from "fs";
 import { NextRequest, NextResponse } from "next/server";
 import { getAllowedFileRoots, isExistingFilePathAllowed, isFilePathAllowed, isWindowsAbsolutePath } from "@/lib/file-access";
 import { getGitStatus } from "@/lib/git-changes";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 export async function GET(request: NextRequest) {
   try {
+    const user = getRequestWebUser(request);
     const cwd = request.nextUrl.searchParams.get("cwd")?.trim() ?? "";
     if (!cwd || (!cwd.startsWith("/") && !isWindowsAbsolutePath(cwd))) {
       return NextResponse.json({ error: "cwd must be an absolute path" }, { status: 400 });
     }
 
-    const allowedRoots = await getAllowedFileRoots();
+    const allowedRoots = await getAllowedFileRoots(user.id);
     if (!isFilePathAllowed(cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }

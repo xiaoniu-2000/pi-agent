@@ -12,17 +12,18 @@ import { normalizeToolCalls } from "./normalize";
 import { sessionPathKey } from "./session-path";
 import { resolveProject, type ProjectInfo } from "./worktree";
 import {
+  getManagedUserId,
   isManagedSessionMode,
   listManagedSessionRoots,
 } from "./managed-session-workspace";
 
 export { getAgentDir };
 
-async function loadAllSessions(): Promise<SessionInfo[]> {
+async function loadAllSessions(userId?: string): Promise<SessionInfo[]> {
   let piSessions: PiSessionInfo[];
   if (isManagedSessionMode()) {
     const perSession = await Promise.all(
-      listManagedSessionRoots().map(async (sessionRoot) => {
+      listManagedSessionRoots(userId).map(async (sessionRoot) => {
         try {
           return await SessionManager.listAll(sessionRoot);
         } catch (error) {
@@ -46,11 +47,11 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
   const uniqueCwds = [...new Set(piSessions.map((s) => s.cwd).filter(Boolean))];
   const projectByCwd = new Map<string, ProjectInfo>();
   await Promise.all(uniqueCwds.map(async (cwd) => {
-    projectByCwd.set(cwd, await resolveProject(cwd));
+    projectByCwd.set(cwd, await resolveProject(cwd, userId));
   }));
 
   return piSessions.map((s) => {
-    cacheSessionPath(s.id, s.path);
+    cacheSessionPath(s.id, s.path, userId);
     const project = s.cwd ? projectByCwd.get(s.cwd) : undefined;
     return {
       path: s.path,
@@ -68,93 +69,116 @@ async function loadAllSessions(): Promise<SessionInfo[]> {
   });
 }
 
-export async function listAllSessions(): Promise<SessionInfo[]> {
-  const generation = globalThis.__piSessionListGeneration ?? 0;
+interface UserSessionCache {
+  generation: number;
+  listPromise?: Promise<SessionInfo[]>;
+  listPromiseGeneration?: number;
+  listCache?: { data: SessionInfo[]; ts: number };
+  pathCache: Map<string, string>;
+  pathToSessionIdCache: Map<string, string>;
+}
+
+declare global {
+  var __piUserSessionCaches: Map<string, UserSessionCache> | undefined;
+}
+
+function sessionCacheKey(userId?: string): string {
+  return isManagedSessionMode() ? getManagedUserId(userId) : userId || "__legacy__";
+}
+
+function getUserSessionCache(userId?: string): UserSessionCache {
+  if (!globalThis.__piUserSessionCaches) globalThis.__piUserSessionCaches = new Map();
+  const key = sessionCacheKey(userId);
+  let cache = globalThis.__piUserSessionCaches.get(key);
+  if (!cache) {
+    cache = {
+      generation: 0,
+      pathCache: new Map(),
+      pathToSessionIdCache: new Map(),
+    };
+    globalThis.__piUserSessionCaches.set(key, cache);
+  }
+  return cache;
+}
+
+export async function listAllSessions(userId?: string): Promise<SessionInfo[]> {
+  const userCache = getUserSessionCache(userId);
+  const generation = userCache.generation;
 
   // Return cached result if still fresh (avoids re-scanning session files
   // and re-spawning git processes on every page load).
-  if (globalThis.__piSessionListCache && Date.now() - globalThis.__piSessionListCache.ts < SESSION_LIST_CACHE_TTL_MS) {
-    return globalThis.__piSessionListCache.data;
+  if (userCache.listCache && Date.now() - userCache.listCache.ts < SESSION_LIST_CACHE_TTL_MS) {
+    return userCache.listCache.data;
   }
 
   // Coalescing dedup: concurrent callers share the same in-flight promise
   // only while it belongs to the current cache generation.
-  if (globalThis.__piSessionListPromise && globalThis.__piSessionListPromiseGeneration === generation) {
-    return globalThis.__piSessionListPromise;
+  if (userCache.listPromise && userCache.listPromiseGeneration === generation) {
+    return userCache.listPromise;
   }
 
-  const loadPromise = loadAllSessions().then((data) => {
+  const loadPromise = loadAllSessions(userId).then((data) => {
     // An invalidation may happen while the scan is in flight. Do not let that
     // older result repopulate the cache after a session mutation.
-    if ((globalThis.__piSessionListGeneration ?? 0) === generation) {
-      globalThis.__piSessionListCache = { data, ts: Date.now() };
+    if (userCache.generation === generation) {
+      userCache.listCache = { data, ts: Date.now() };
     }
     return data;
   });
   const trackedPromise = loadPromise.finally(() => {
-    if (globalThis.__piSessionListPromise === trackedPromise) {
-      globalThis.__piSessionListPromise = undefined;
-      globalThis.__piSessionListPromiseGeneration = undefined;
+    if (userCache.listPromise === trackedPromise) {
+      userCache.listPromise = undefined;
+      userCache.listPromiseGeneration = undefined;
     }
   });
 
-  globalThis.__piSessionListPromise = trackedPromise;
-  globalThis.__piSessionListPromiseGeneration = generation;
+  userCache.listPromise = trackedPromise;
+  userCache.listPromiseGeneration = generation;
   return trackedPromise;
 }
 
 // ============================================================================
-// Session path caches, stored in globalThis for hot-reload safety.
+// Per-user session path caches, stored in globalThis for hot-reload safety.
 // ============================================================================
-declare global {
-  var __piSessionPathCache: Map<string, string> | undefined;
-  var __piPathToSessionIdCache: Map<string, string> | undefined;
-  var __piSessionListPromise: Promise<SessionInfo[]> | undefined;
-  var __piSessionListPromiseGeneration: number | undefined;
-  var __piSessionListGeneration: number | undefined;
-  var __piSessionListCache: { data: SessionInfo[]; ts: number } | undefined;
-}
-
 const SESSION_LIST_CACHE_TTL_MS = 30_000;
 
-export function invalidateSessionListCache(): void {
-  globalThis.__piSessionListGeneration = (globalThis.__piSessionListGeneration ?? 0) + 1;
-  globalThis.__piSessionListCache = undefined;
+export function invalidateSessionListCache(userId?: string): void {
+  const cache = getUserSessionCache(userId);
+  cache.generation += 1;
+  cache.listCache = undefined;
 }
 
-function getPathCache(): Map<string, string> {
-  if (!globalThis.__piSessionPathCache) globalThis.__piSessionPathCache = new Map();
-  return globalThis.__piSessionPathCache;
+function getPathCache(userId?: string): Map<string, string> {
+  return getUserSessionCache(userId).pathCache;
 }
 
-function getPathToIdCache(): Map<string, string> {
-  if (!globalThis.__piPathToSessionIdCache) globalThis.__piPathToSessionIdCache = new Map();
-  return globalThis.__piPathToSessionIdCache;
+function getPathToIdCache(userId?: string): Map<string, string> {
+  return getUserSessionCache(userId).pathToSessionIdCache;
 }
 
-export async function resolveSessionPath(sessionId: string): Promise<string | null> {
-  const cached = getPathCache().get(sessionId);
+export async function resolveSessionPath(sessionId: string, userId?: string): Promise<string | null> {
+  const cached = getPathCache(userId).get(sessionId);
   if (cached) return cached;
 
   // Cache miss: scan all sessions to populate cache, then retry
-  await listAllSessions();
-  return getPathCache().get(sessionId) ?? null;
+  await listAllSessions(userId);
+  return getPathCache(userId).get(sessionId) ?? null;
 }
 
-export async function resolveSessionIdByPath(filePath: string): Promise<string | undefined> {
+export async function resolveSessionIdByPath(filePath: string, userId?: string): Promise<string | undefined> {
   const pathKey = sessionPathKey(filePath);
-  const cached = getPathToIdCache().get(pathKey);
+  const cached = getPathToIdCache(userId).get(pathKey);
   if (cached) return cached;
 
-  await listAllSessions();
-  return getPathToIdCache().get(pathKey);
+  await listAllSessions(userId);
+  return getPathToIdCache(userId).get(pathKey);
 }
 
-export function cacheSessionPath(sessionId: string, filePath: string): void {
+export function cacheSessionPath(sessionId: string, filePath: string, userId?: string): void {
   const normalizedPath = normalizePath(filePath);
   const pathKey = sessionPathKey(normalizedPath);
-  const pathCache = getPathCache();
-  const reverseCache = getPathToIdCache();
+  const pathCache = getPathCache(userId);
+  const reverseCache = getPathToIdCache(userId);
   const previousPath = pathCache.get(sessionId);
   const previousPathKey = previousPath ? sessionPathKey(previousPath) : undefined;
   const previousSessionId = reverseCache.get(pathKey);
@@ -174,9 +198,9 @@ export function cacheSessionPath(sessionId: string, filePath: string): void {
   reverseCache.set(pathKey, sessionId);
 }
 
-export function invalidateSessionPathCache(sessionId: string): void {
-  const pathCache = getPathCache();
-  const reverseCache = getPathToIdCache();
+export function invalidateSessionPathCache(sessionId: string, userId?: string): void {
+  const pathCache = getPathCache(userId);
+  const reverseCache = getPathToIdCache(userId);
   const filePath = pathCache.get(sessionId);
   pathCache.delete(sessionId);
   const pathKey = filePath ? sessionPathKey(filePath) : undefined;

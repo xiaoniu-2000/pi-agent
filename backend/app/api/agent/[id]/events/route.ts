@@ -1,6 +1,7 @@
 import { resolveSessionPath } from "@/lib/session-reader";
 import { getRpcSession, startRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -10,17 +11,18 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const user = getRequestWebUser(req);
 
   // Fast path: already-running session
-  let session = getRpcSession(id);
+  let session = getRpcSession(id, user.id);
   if (!session || !session.isAlive()) {
-    const filePath = await resolveSessionPath(id);
+    const filePath = await resolveSessionPath(id, user.id);
     if (!filePath) {
       return new Response("Session not found", { status: 404 });
     }
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
     try {
-      ({ session } = await startRpcSession(id, filePath, cwd));
+      ({ session } = await startRpcSession(id, filePath, cwd, undefined, undefined, user.id));
     } catch (error) {
       return new Response(`Failed to start agent: ${error}`, { status: 500 });
     }

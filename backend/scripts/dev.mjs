@@ -29,6 +29,8 @@ const env = {
   ...process.env,
   PI_CODING_AGENT_DIR: piAgentDir,
   PI_WEB_USER_DATA_ROOT: userDataRoot,
+  PI_WEB_AUTH_ENABLED: process.env.PI_WEB_AUTH_ENABLED || "1",
+  PI_WEB_SELF_REGISTRATION_ENABLED: process.env.PI_WEB_SELF_REGISTRATION_ENABLED || "1",
   PI_WEB_FIXED_USER_ID: process.env.PI_WEB_FIXED_USER_ID || "user1",
   PI_WEB_CORS_ORIGINS: process.env.PI_WEB_CORS_ORIGINS || localFrontendOrigins.join(","),
 };
@@ -37,6 +39,7 @@ console.log("Pi Web backend local development settings:");
 console.log(`  URL: http://${hostname}:${port} (health: /api/health)`);
 console.log(`  managed user data: ${userDataRoot}`);
 console.log(`  agent config: ${piAgentDir}`);
+console.log(`  web authentication: ${(env.PI_WEB_AUTH_ENABLED === "1") ? "enabled" : "disabled"}`);
 console.log("  security: direct local dev inherits your macOS user file permissions; use Docker for isolation");
 if (lanMode && !process.env.PI_WEB_CORS_ORIGINS) {
   console.log("  LAN note: set PI_WEB_CORS_ORIGINS to the frontend's actual http://IP:30141 origin");

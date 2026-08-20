@@ -7,6 +7,7 @@ import { promisify } from "util";
 import { fileURLToPath, pathToFileURL } from "url";
 import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 const execFileAsync = promisify(execFile);
 
@@ -246,7 +247,8 @@ export async function GET(
   const inline = new URL(req.url).searchParams.get("inline") === "1";
 
   try {
-    const filePath = await resolveSessionPath(id);
+    const user = getRequestWebUser(req);
+    const filePath = await resolveSessionPath(id, user.id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { resolveSessionPath, buildSessionContext } from "@/lib/session-reader";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 export async function GET(
   req: Request,
@@ -13,7 +14,8 @@ export async function GET(
   const deferToolResultImages = url.searchParams.has("deferMedia");
 
   try {
-    const filePath = await resolveSessionPath(id);
+    const user = getRequestWebUser(req);
+    const filePath = await resolveSessionPath(id, user.id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }

@@ -1,18 +1,20 @@
 import { NextResponse } from "next/server";
 import { getRpcSession } from "@/lib/rpc-manager";
 import { resolveSessionPath } from "@/lib/session-reader";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
   const { id } = await params;
   try {
-    if (!await resolveSessionPath(id)) {
+    const user = getRequestWebUser(req);
+    if (!await resolveSessionPath(id, user.id)) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
-    const rpc = getRpcSession(id);
+    const rpc = getRpcSession(id, user.id);
     if (!rpc?.isAlive()) return NextResponse.json({ running: false });
 
     const state = await rpc.send({ type: "get_state" });

@@ -1,7 +1,7 @@
 # 新能源气象智能分析 Agent（前后端分离版）
 
 本项目从 `pi-web-custom` 0.8.1 重构而来，保留了原有界面定制、Pi Agent
-能力和 Stage 1 托管会话目录补丁，部署边界改为：
+能力、托管会话目录和 Stage 2 多用户登录，部署边界改为：
 
 - `frontend/`：纯静态 Next.js 导出物，可打包为 WAR 放入 Tomcat；
 - `backend/`：仅提供 API、SSE、AgentSession 和文件服务，以 Docker 运行；
@@ -42,9 +42,12 @@ runtime/user-data/
             └── workspace/        # 上传文件、脚本、图表数据、生成报告
 ```
 
-删除会话时，会话转录和该会话的 `workspace/` 会一起删除。当前仍使用
-`PI_WEB_FIXED_USER_ID` 固定身份；这与原补丁的 Stage 1 范围一致，并不等同于
-多用户认证。接入统一登录前，不应把后端开放到不可信网络。
+删除会话时，会话转录和该会话的 `workspace/` 会一起删除。启用
+`PI_WEB_AUTH_ENABLED=1` 后，后端从签名的 HttpOnly 登录 Cookie 中取得当前用户，
+所有会话、文件允许根目录、运行中 Agent 和缓存均按用户隔离。`PI_WEB_FIXED_USER_ID`
+只在显式设置 `PI_WEB_AUTH_ENABLED=0` 时作为单用户开发兼容身份。
+登录页支持自助注册；网页注册的账号始终是普通用户，管理员只能通过服务器上的账号
+管理脚本创建或提升。可用 `PI_WEB_SELF_REGISTRATION_ENABLED=0` 随时关闭新注册。
 
 `meta.json` 的 `createdAt` 使用带明确 `+08:00` 偏移的北京时间。浏览器为新对话
 预分配的目录若在页面关闭、切回历史会话或被另一个新草稿替代时，仍无会话转录、
@@ -71,10 +74,17 @@ cp .env.example .env
 编辑 `.env`：
 
 ```dotenv
-PI_WEB_FIXED_USER_ID=user1
-PI_WEB_CORS_ORIGINS=http://10.10.10.21:8080
+PI_WEB_AUTH_ENABLED=1
+PI_WEB_SELF_REGISTRATION_ENABLED=1
+PI_WEB_MAX_USERS=500
+PI_WEB_SESSION_TTL_HOURS=12
+PI_WEB_COOKIE_SECURE=0
+PI_WEB_CORS_ORIGINS=http://10.10.10.21:18093
 PI_WEB_BACKEND_PORT=30142
 ```
+
+`PI_WEB_CORS_ORIGINS` 填写 Origin，不带 `/pi-agent` 路径。当前若仍使用 HTTP，
+`PI_WEB_COOKIE_SECURE` 必须为 `0`；前置网关启用 HTTPS 后改为 `1`。
 
 把 `python_sandbox` 扩展内容复制到 `extensions/python_sandbox/`，或把
 `compose.yaml` 中这一条挂载的左侧改为内网服务器上的绝对路径：
@@ -83,11 +93,24 @@ PI_WEB_BACKEND_PORT=30142
 - /opt/pi/extensions/python_sandbox:/data/pi-agent/extensions/python_sandbox:ro
 ```
 
-然后启动：
+先构建镜像并创建第一个管理员。使用 `user1` 可直接保留现有
+`runtime/user-data/user1/` 中的历史会话：
 
 ```bash
-docker compose up -d --build backend
+docker compose build backend
+docker compose run --rm backend node scripts/manage-web-user.mjs set user1 --admin
+docker compose up -d backend
 curl http://127.0.0.1:30142/api/health
+```
+
+账号脚本会在终端中隐藏密码输入，并把 scrypt 密码哈希写入
+`runtime/pi-agent/web-users.json`；不会保存明文密码。修改密码会使该账号已有登录
+Cookie 立即失效。`user1` 会继续保持管理员身份；同事可以直接在登录页注册普通账号，
+也可以由管理员预先新增或查看账号：
+
+```bash
+docker compose run --rm backend node scripts/manage-web-user.mjs set user2
+docker compose run --rm backend node scripts/manage-web-user.mjs list
 ```
 
 模型、凭据和 Agent 全局配置放在 `runtime/pi-agent/`；用户会话和生成文件放在
@@ -97,29 +120,37 @@ curl http://127.0.0.1:30142/api/health
 ### 完全离线服务器
 
 如果内网服务器不能联网，不要在服务器运行 `--build`。在有 npm 和 Docker 的
-MacBook 构建 `linux/amd64` 离线包，其中包含后端镜像 tar、配置好后端地址的
+MacBook 构建 `linux/amd64` 离线包，其中包含后端镜像 tar、自动使用页面主机名的
 `ROOT.war`、Compose 文件和运行目录：
 
 ```bash
 RELEASE_VERSION=0.1.0 \
   NEXT_PUBLIC_BASE_PATH=/pi-agent \
-  PI_WEB_API_BASE_URL=http://10.10.10.21:30142 \
   sh scripts/build-offline-bundle.sh
 ```
+
+默认页面会自动连接“当前页面主机名”的 `30142` 端口，因此本机使用
+`127.0.0.1` 或 `localhost`、服务器使用 `10.10.10.21` 时都不必改源码。只有后端
+确实位于另一台主机时，才需要额外传入 `PI_WEB_API_BASE_URL`。
 
 产物为 `dist/pi-agent-install-0.1.0.tar.gz`。把它复制到服务器并解压，
 然后只执行：
 
 ```bash
 cp .env.example .env
-# 编辑 .env：PI_WEB_CORS_ORIGINS 必须是 Tomcat 页面地址，例如 http://10.10.10.21:8080
+# 编辑 .env：PI_WEB_CORS_ORIGINS 必须是 Tomcat 页面地址，例如 http://10.10.10.21:18093
 # Linux 上确保容器 UID 1000 可写：chown -R 1000:1000 runtime/pi-agent runtime/user-data
 docker load -i pi-agent-backend-0.1.0.tar
+docker compose run --rm backend node scripts/manage-web-user.mjs set user1 --admin
 docker compose up -d
 ```
 
 若这套 Docker 没有 Compose 插件，最后一条改成 `sh run-backend.sh`；该脚本只调用
-`docker run`。
+`docker run`。创建账号的命令相应改为：
+
+```bash
+sh run-backend.sh manage-user set user1 --admin
+```
 
 最后把同一目录中的 `ROOT.war` 复制为
 `/opt/agent/tomcat9/webapps/pi-agent.war`。这一流程不会在服务器上
@@ -127,8 +158,9 @@ docker compose up -d
 `TARGET_PLATFORM=linux/arm64` 改变镜像架构。
 
 为避免发布包夹带密钥，完整包只创建 `runtime/pi-agent/` 和扩展目录骨架，不复制构建机
-上的真实 `auth.json`、`models.json`、`settings.json` 或私有扩展。首次启动前要通过内网
-安全渠道把这些运行配置放入服务器对应目录；后续版本更新不会覆盖它们。
+上的真实 `auth.json`、`models.json`、`settings.json`、`web-users.json`、登录签名密钥或
+私有扩展。首次启动前要通过内网安全渠道把模型运行配置放入服务器对应目录，并在服务器
+执行上面的账号创建命令；后续版本更新不会覆盖它们。
 
 这个完整 `.tar.gz` 只用于首次安装或前后端同时发布。里面的 `run-backend.sh` 是没有
 Docker Compose 插件时的 `docker run` 备用入口；`DEPLOY.txt` 只是给运维人员看的操作
@@ -162,14 +194,6 @@ Compose 命令。若某一版修改了页面或后端接口不再兼容旧页面
 构建机要求 Node.js 22.19+。前端依赖在构建时打包，ECharts 不使用公网 CDN，
 部署到隔离内网后仍可正常绘图。
 
-先编辑 `frontend/public/config.js`：
-
-```js
-window.PI_WEB_CONFIG = {
-  apiBaseUrl: "http://10.10.10.21:30142"
-};
-```
-
 安装依赖并生成根应用 WAR：
 
 ```bash
@@ -189,9 +213,10 @@ NEXT_PUBLIC_BASE_PATH=/pi-agent WAR_NAME=pi-agent npm run build:war -w frontend
 产物为 `frontend/dist/pi-agent.war`，访问地址为
 `http://<tomcat-host>:<port>/pi-agent/`。
 
-`config.js` 是运行时配置。Tomcat 解压 WAR 后，可以直接修改对应 Web 应用中的
-`config.js` 来切换后端，不必重新生成 WAR。生产环境建议让 Tomcat 或前置网关对
-该文件设置 `Cache-Control: no-store`。
+`config.js` 是运行时配置，默认自动使用页面当前主机名和后端端口 `30142`，登录页不会
+要求用户填写后端地址。Tomcat 解压 WAR 后，仍可修改对应 Web 应用中的 `config.js`
+切换到另一台后端，不必重新生成 WAR。生产环境建议让 Tomcat 或前置网关对该文件设置
+`Cache-Control: no-store`。
 
 ## 3. ECharts 交互图
 
@@ -289,6 +314,7 @@ Agent 回复中的本地文件 Markdown 链接显示为“预览 + 下载”：
 
 ```bash
 npm install
+npm run user:set -- user1 --admin
 npm run dev -w backend      # 终端 1
 npm run dev -w frontend     # 终端 2
 ```
@@ -301,13 +327,14 @@ npm run dev -w frontend     # 终端 2
 
 - `runtime/pi-agent/` 为 Pi 配置目录；
 - `runtime/user-data/` 为托管用户数据根目录；
-- `user1` 为 Stage 1 固定用户；
+- Web 登录默认开启，账号从 `runtime/pi-agent/web-users.json` 读取；
+- 自助注册默认开启，网页新账号固定为普通用户，`user1` 管理员不会被覆盖；
 - `localhost:30141` 为允许访问 API 的开发前端 Origin。
 
-因此界面进入托管会话模式后，不需要也不应该手工输入 `runtime/user-data`。点击
-`New`，后端会自动创建
-`runtime/user-data/user1/sessions/<session-id>/workspace/`。修改启动脚本或环境变量后，
-必须停止并重新启动两个开发进程。
+因此界面进入托管会话模式后，不需要也不应该手工输入 `runtime/user-data`。用户登录后
+点击 `New`，后端会自动创建
+`runtime/user-data/<登录用户>/sessions/<session-id>/workspace/`。修改启动脚本或环境
+变量后，必须停止并重新启动两个开发进程。
 
 需要让局域网其他电脑联调时，使用下面的命令，并把实际前端 IP Origin 明确加入
 CORS；不要让浏览器访问 `0.0.0.0`：
@@ -326,8 +353,9 @@ npm test
 npm run build
 ```
 
-默认 `frontend/public/config.js` 已指向 `http://localhost:30142`。也可以临时通过
-`?apiUrl=http://host:30142` 覆盖，便于联调。
+默认 `frontend/public/config.js` 会使用浏览器当前主机名和 `30142` 端口，避免
+`localhost` 与 `127.0.0.1` 混用导致登录 Cookie 丢失。也可以临时通过
+`?apiUrl=http://host:30142` 覆盖，便于跨主机联调。
 
 `npm install` 输出的 deprecated 和 `npm allow-scripts` 信息不是本次
 `Failed to fetch` 的原因：安装已经成功且审计结果为 0 个漏洞。不要为了消除提示就
@@ -342,13 +370,17 @@ npm run build
 
 ## 安全边界
 
-- 后端没有完整登录系统，当前只适合受信任内网；
+- 后端要求账号密码登录，密码使用 scrypt 哈希，登录态使用签名 HttpOnly Cookie；
+- 自助注册账号固定为普通用户，并有注册频率和账号总数限制；人员入组结束后可设置
+  `PI_WEB_SELF_REGISTRATION_ENABLED=0` 关闭公开注册；
 - `PI_WEB_CORS_ORIGINS` 应填写精确 Tomcat Origin，避免在共享环境使用 `*`；
 - API 只能读取已分配会话工作目录或会话明确引用的文件；
+- 后端端口仍建议只允许本机或前置网关访问，并尽快通过 HTTPS 设置
+  `PI_WEB_COOKIE_SECURE=1`；
 - `python_sandbox` 以只读方式挂载扩展代码，但扩展工具本身拥有的执行能力仍需按
   单位安全要求审查；
-- 真正上线多用户前，应由网关完成认证，并把可信用户标识传给后端，再进入 Stage 2
-  的动态用户目录映射。
+- `runtime/pi-agent/models.json`、模型供应商凭据、全局 Skills/Plugins 仍是共享配置，
+  应只交由可信管理员维护；用户聊天和工作文件则按登录账号隔离。
 
 ## 相比原项目的主要变化
 
@@ -357,4 +389,5 @@ npm run build
 - 后端以 standalone Docker 镜像运行，数据、配置、扩展全部外置挂载；
 - 新增严格 JSON 的 Apache ECharts 消息渲染；
 - 新增对 Agent 生成文件的明显下载入口；
-- 保留 `pi-web-v0.8.1-stage1-managed-sessions.patch` 的目录分配、复制、删除和访问控制逻辑。
+- 将 Stage 1 固定 `user1` 升级为带登录态的请求级用户目录隔离，同时兼容原 `user1` 数据。
+- 新增自助注册、当前用户/角色展示和明确的退出入口；`user1` 保持管理员身份。

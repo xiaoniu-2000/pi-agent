@@ -19,6 +19,7 @@ import { buildAtMentionText, buildFileAtMentionsText, buildFileLineMentionText }
 import { getInitialNavigation } from "@/lib/initial-navigation";
 import { apiUrl } from "@/lib/runtime-api";
 import type { SessionInfo, SessionTreeNode } from "@/lib/types";
+import type { WebAccount } from "@/lib/account";
 import type { ChatInputHandle } from "./ChatInput";
 import type { SessionStatsInfo } from "@/lib/pi-types";
 
@@ -29,7 +30,7 @@ type AutoNameStatus =
   | { kind: "success" }
   | { kind: "error"; message: string };
 
-export function AppShell() {
+export function AppShell({ webUser, onLogout }: { webUser: WebAccount; onLogout: () => void | Promise<void> }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [initialNavigation] = useState(() => getInitialNavigation(searchParams));
@@ -515,7 +516,7 @@ export function AppShell() {
         onAtMention={handleAtMention}
         onAtMentions={handleAtMentions}
       />
-      <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
+      {webUser.role === "admin" && <div style={{ padding: "8px", flexShrink: 0, display: "flex", justifyContent: "space-between", gap: 4 }}>
         {([
           {
             label: "Models",
@@ -576,6 +577,67 @@ export function AppShell() {
             {label}
           </button>
         ))}
+      </div>}
+      <div style={{
+        minHeight: 56,
+        padding: "8px 10px",
+        borderTop: "1px solid var(--border)",
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        flexShrink: 0,
+      }}>
+        <div style={{
+          width: 32,
+          height: 32,
+          borderRadius: "50%",
+          display: "grid",
+          placeItems: "center",
+          flexShrink: 0,
+          background: "color-mix(in srgb, var(--accent) 14%, var(--bg))",
+          color: "var(--accent)",
+          fontSize: 13,
+          fontWeight: 750,
+          textTransform: "uppercase",
+        }}>
+          {(webUser.displayName || webUser.id).slice(0, 1)}
+        </div>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div title={webUser.displayName} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text)", fontSize: 12, fontWeight: 600 }}>
+            {webUser.displayName}
+          </div>
+          <div title={`${webUser.id} · ${webUser.role === "admin" ? "管理员" : "普通用户"}`} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--text-dim)", fontSize: 10 }}>
+            @{webUser.id} · {webUser.role === "admin" ? "管理员" : "普通用户"}
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void onLogout()}
+          title="退出登录"
+          aria-label="退出登录"
+          style={{
+            minWidth: 54,
+            height: 30,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 5,
+            flexShrink: 0,
+            padding: "0 8px",
+            border: 0,
+            borderRadius: 8,
+            background: "transparent",
+            color: "var(--text-muted)",
+            cursor: "pointer",
+            fontSize: 11,
+            fontWeight: 600,
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10 17l5-5-5-5" /><path d="M15 12H3" /><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+          </svg>
+          退出
+        </button>
       </div>
     </>
   );

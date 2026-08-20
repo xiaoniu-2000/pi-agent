@@ -21,6 +21,21 @@ BACKEND_PORT=${PI_WEB_BACKEND_PORT:-${ENV_BACKEND_PORT:-30142}}
 CONTAINER_NAME=${PI_WEB_CONTAINER_NAME:-${ENV_CONTAINER_NAME:-pi-web-separated-backend}}
 BACKEND_IMAGE=${PI_WEB_BACKEND_IMAGE:-${ENV_BACKEND_IMAGE:-pi-web-separated-backend:0.1.0}}
 
+if [ "${1:-}" = "manage-user" ]; then
+  shift
+  if [ "$#" -eq 0 ]; then
+    echo "Usage: sh run-backend.sh manage-user <list|set|enable|disable> [arguments...]" >&2
+    exit 2
+  fi
+  docker run --rm -it \
+    --env-file "$SCRIPT_DIR/.env" \
+    -e PI_CODING_AGENT_DIR=/data/pi-agent \
+    -v "$SCRIPT_DIR/runtime/pi-agent:/data/pi-agent" \
+    "$BACKEND_IMAGE" \
+    node scripts/manage-web-user.mjs "$@"
+  exit 0
+fi
+
 docker run -d \
   --name "$CONTAINER_NAME" \
   --restart unless-stopped \

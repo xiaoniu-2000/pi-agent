@@ -15,7 +15,7 @@ export { allowFileRoot, normalizeSlashes } from "./allowed-roots";
 // enough that newly-created cwds appear promptly; stored on globalThis so it
 // survives Next.js hot-reload.
 declare global {
-  var __piAllowedRootsCache: { roots: Set<string>; expiresAt: number } | undefined;
+  var __piAllowedRootsCaches: Map<string, { roots: Set<string>; expiresAt: number }> | undefined;
 }
 
 const ALLOWED_ROOTS_TTL_MS = 5_000;
@@ -25,12 +25,14 @@ export function isWindowsAbsolutePath(filePath: string): boolean {
   return WINDOWS_ABSOLUTE_RE.test(filePath) || filePath.startsWith("\\\\") || filePath.startsWith("//");
 }
 
-export async function getAllowedFileRoots(): Promise<Set<string>> {
+export async function getAllowedFileRoots(userId?: string): Promise<Set<string>> {
   const now = Date.now();
-  const cached = globalThis.__piAllowedRootsCache;
+  if (!globalThis.__piAllowedRootsCaches) globalThis.__piAllowedRootsCaches = new Map();
+  const cacheKey = userId || "__legacy__";
+  const cached = globalThis.__piAllowedRootsCaches.get(cacheKey);
   if (cached && cached.expiresAt > now) return cached.roots;
 
-  const sessions = await listAllSessions();
+  const sessions = await listAllSessions(userId);
   const managedSessions = isManagedSessionMode();
   const roots = new Set<string>();
   for (const s of sessions) {
@@ -55,11 +57,11 @@ export async function getAllowedFileRoots(): Promise<Set<string>> {
     }
   }
 
-  for (const root of getAdditionalAllowedRoots()) {
-    if (!managedSessions || managedSessionFromWorkspace(root)) roots.add(root);
+  for (const root of getAdditionalAllowedRoots(userId)) {
+    if (!managedSessions || managedSessionFromWorkspace(root, userId)) roots.add(root);
   }
 
-  globalThis.__piAllowedRootsCache = { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS };
+  globalThis.__piAllowedRootsCaches.set(cacheKey, { roots, expiresAt: now + ALLOWED_ROOTS_TTL_MS });
   return roots;
 }
 

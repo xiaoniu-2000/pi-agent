@@ -7,6 +7,7 @@ import {
   isManagedSessionMode,
   managedSessionFromWorkspace,
 } from "@/lib/managed-session-workspace";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 function normalizeCwd(cwd: string): string {
   if (cwd === "~") return homedir();
@@ -18,6 +19,7 @@ function normalizeCwd(cwd: string): string {
 // Validates a candidate workspace before the UI selects it.
 export async function POST(req: Request) {
   try {
+    const user = getRequestWebUser(req);
     const body = await req.json() as { cwd?: unknown };
     const cwd = typeof body.cwd === "string" ? body.cwd.trim() : "";
 
@@ -26,7 +28,7 @@ export async function POST(req: Request) {
     }
 
     const normalizedCwd = normalizeCwd(cwd);
-    if (isManagedSessionMode() && !managedSessionFromWorkspace(normalizedCwd)) {
+    if (isManagedSessionMode() && !managedSessionFromWorkspace(normalizedCwd, user.id)) {
       return NextResponse.json(
         { error: "Only managed session workspaces may be selected" },
         { status: 403 },
@@ -43,7 +45,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: `Path is not a directory: ${cwd}` }, { status: 400 });
     }
 
-    allowFileRoot(normalizedCwd);
+    allowFileRoot(normalizedCwd, user.id);
     return NextResponse.json({ success: true, cwd: normalizedCwd });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

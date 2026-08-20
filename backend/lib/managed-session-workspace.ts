@@ -10,8 +10,8 @@ import {
 } from "fs";
 import { randomUUID } from "crypto";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "path";
+import { isWebAuthEnabled, validateWebUserId } from "./web-auth";
 
-const USER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 const SESSION_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 const BEIJING_UTC_OFFSET_MS = 8 * 60 * 60 * 1000;
 
@@ -38,25 +38,31 @@ export function isManagedSessionMode(): boolean {
   return configuredUserDataRoot() !== null;
 }
 
-/** Stage 1 uses a fixed identity; Stage 2 will replace this with auth state. */
-export function getManagedUserId(): string {
-  const userId = process.env.PI_WEB_FIXED_USER_ID?.trim() || "user1";
-  if (!USER_ID_PATTERN.test(userId)) {
-    throw new Error(
-      "PI_WEB_FIXED_USER_ID must contain only letters, numbers, '.', '_' or '-'",
-    );
+/** Resolve an authenticated user ID, retaining the Stage 1 identity only when auth is disabled. */
+export function getManagedUserId(authenticatedUserId?: string): string {
+  const userId = authenticatedUserId?.trim()
+    || (!isWebAuthEnabled() ? process.env.PI_WEB_FIXED_USER_ID?.trim() || "user1" : "");
+  if (!userId) throw new Error("Authenticated user ID is required");
+  try {
+    return validateWebUserId(userId);
+  } catch (error) {
+    if (!authenticatedUserId && !isWebAuthEnabled()) {
+      throw new Error(
+        "PI_WEB_FIXED_USER_ID must contain only letters, numbers, '.', '_' or '-'",
+      );
+    }
+    throw error;
   }
-  return userId;
 }
 
-export function getManagedUserRoot(): string {
+export function getManagedUserRoot(authenticatedUserId?: string): string {
   const dataRoot = configuredUserDataRoot();
   if (!dataRoot) throw new Error("Managed-session mode is not enabled");
-  return join(dataRoot, getManagedUserId());
+  return join(dataRoot, getManagedUserId(authenticatedUserId));
 }
 
-export function getManagedSessionsRoot(): string {
-  return join(getManagedUserRoot(), "sessions");
+export function getManagedSessionsRoot(authenticatedUserId?: string): string {
+  return join(getManagedUserRoot(authenticatedUserId), "sessions");
 }
 
 /** ISO 8601 timestamp with an explicit China Standard Time (+08:00) offset. */
@@ -66,12 +72,12 @@ export function toBeijingISOString(date = new Date()): string {
     .replace(/Z$/, "+08:00");
 }
 
-function pathsForSessionId(sessionId: string): ManagedSessionPaths {
+function pathsForSessionId(sessionId: string, authenticatedUserId?: string): ManagedSessionPaths {
   if (!SESSION_ID_PATTERN.test(sessionId)) {
     throw new Error(`Invalid managed session id: ${sessionId}`);
   }
-  const userId = getManagedUserId();
-  const userRoot = getManagedUserRoot();
+  const userId = getManagedUserId(authenticatedUserId);
+  const userRoot = getManagedUserRoot(userId);
   const sessionsRoot = join(userRoot, "sessions");
   const sessionRoot = join(sessionsRoot, sessionId);
   return {
@@ -84,13 +90,14 @@ function pathsForSessionId(sessionId: string): ManagedSessionPaths {
   };
 }
 
-export function allocateManagedSessionWorkspace(): ManagedSessionPaths {
-  const sessionsRoot = getManagedSessionsRoot();
+export function allocateManagedSessionWorkspace(authenticatedUserId?: string): ManagedSessionPaths {
+  const userId = getManagedUserId(authenticatedUserId);
+  const sessionsRoot = getManagedSessionsRoot(userId);
   mkdirSync(sessionsRoot, { recursive: true, mode: 0o750 });
 
   for (let attempt = 0; attempt < 10; attempt += 1) {
     const sessionId = randomUUID();
-    const paths = pathsForSessionId(sessionId);
+    const paths = pathsForSessionId(sessionId, userId);
     if (existsSync(paths.sessionRoot)) continue;
 
     mkdirSync(paths.sessionRoot, { mode: 0o750 });
@@ -112,9 +119,10 @@ export function allocateManagedSessionWorkspace(): ManagedSessionPaths {
 }
 
 /** Resolve an exact <user>/sessions/<session-id>/workspace path. */
-export function managedSessionFromWorkspace(cwd: string): ManagedSessionPaths | null {
+export function managedSessionFromWorkspace(cwd: string, authenticatedUserId?: string): ManagedSessionPaths | null {
   if (!isManagedSessionMode() || !cwd) return null;
-  const sessionsRoot = getManagedSessionsRoot();
+  const userId = getManagedUserId(authenticatedUserId);
+  const sessionsRoot = getManagedSessionsRoot(userId);
   const resolvedCwd = resolve(cwd);
   const rel = relative(sessionsRoot, resolvedCwd);
   const parts = rel.split(sep);
@@ -128,7 +136,7 @@ export function managedSessionFromWorkspace(cwd: string): ManagedSessionPaths | 
     return null;
   }
 
-  const paths = pathsForSessionId(parts[0]);
+  const paths = pathsForSessionId(parts[0], userId);
   if (resolve(paths.workspace) !== resolvedCwd) return null;
   try {
     if (!lstatSync(paths.sessionRoot).isDirectory()) return null;
@@ -141,9 +149,10 @@ export function managedSessionFromWorkspace(cwd: string): ManagedSessionPaths | 
 }
 
 /** Resolve a JSONL stored directly in <user>/sessions/<session-id>/. */
-export function managedSessionFromFile(filePath: string): ManagedSessionPaths | null {
+export function managedSessionFromFile(filePath: string, authenticatedUserId?: string): ManagedSessionPaths | null {
   if (!isManagedSessionMode() || !filePath) return null;
-  const sessionsRoot = getManagedSessionsRoot();
+  const userId = getManagedUserId(authenticatedUserId);
+  const sessionsRoot = getManagedSessionsRoot(userId);
   const resolvedFile = resolve(filePath);
   const rel = relative(sessionsRoot, resolvedFile);
   const parts = rel.split(sep);
@@ -157,13 +166,13 @@ export function managedSessionFromFile(filePath: string): ManagedSessionPaths | 
     return null;
   }
 
-  const paths = pathsForSessionId(parts[0]);
+  const paths = pathsForSessionId(parts[0], userId);
   return dirname(resolvedFile) === paths.sessionRoot ? paths : null;
 }
 
-export function listManagedSessionRoots(): string[] {
+export function listManagedSessionRoots(authenticatedUserId?: string): string[] {
   if (!isManagedSessionMode()) return [];
-  const sessionsRoot = getManagedSessionsRoot();
+  const sessionsRoot = getManagedSessionsRoot(authenticatedUserId);
   if (!existsSync(sessionsRoot)) return [];
 
   return readdirSync(sessionsRoot, { withFileTypes: true })
@@ -171,9 +180,9 @@ export function listManagedSessionRoots(): string[] {
     .map((entry) => join(sessionsRoot, entry.name));
 }
 
-export function listManagedSessionFiles(): string[] {
+export function listManagedSessionFiles(authenticatedUserId?: string): string[] {
   const files: string[] = [];
-  for (const sessionRoot of listManagedSessionRoots()) {
+  for (const sessionRoot of listManagedSessionRoots(authenticatedUserId)) {
     for (const entry of readdirSync(sessionRoot, { withFileTypes: true })) {
       if (entry.isFile() && entry.name.endsWith(".jsonl")) {
         files.push(join(sessionRoot, entry.name));
@@ -203,8 +212,8 @@ export function copyManagedWorkspace(sourceCwd: string, destinationCwd: string):
  * workspace files. Callers must separately ensure that no live RPC session is
  * using the workspace.
  */
-export function discardPristineManagedSessionWorkspace(workspace: string): boolean {
-  const paths = managedSessionFromWorkspace(workspace);
+export function discardPristineManagedSessionWorkspace(workspace: string, authenticatedUserId?: string): boolean {
+  const paths = managedSessionFromWorkspace(workspace, authenticatedUserId);
   if (!paths) return false;
 
   const sessionEntries = readdirSync(paths.sessionRoot, { withFileTypes: true });
@@ -218,7 +227,7 @@ export function discardPristineManagedSessionWorkspace(workspace: string): boole
 }
 
 export function removeManagedSessionRoot(paths: ManagedSessionPaths): void {
-  const expected = pathsForSessionId(paths.sessionId);
+  const expected = pathsForSessionId(paths.sessionId, paths.userId);
   if (resolve(expected.sessionRoot) !== resolve(paths.sessionRoot)) {
     throw new Error("Refusing to remove an unexpected managed session path");
   }

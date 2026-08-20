@@ -91,3 +91,24 @@ test("rejects unsafe fixed user ids", () => {
     else process.env.PI_WEB_FIXED_USER_ID = previousUser;
   }
 });
+
+test("keeps authenticated users in separate managed roots", async (t) => {
+  const root = await mkdtemp(join(tmpdir(), "pi-web-managed-users-"));
+  const previousRoot = process.env.PI_WEB_USER_DATA_ROOT;
+  process.env.PI_WEB_USER_DATA_ROOT = root;
+  t.after(() => {
+    if (previousRoot === undefined) delete process.env.PI_WEB_USER_DATA_ROOT;
+    else process.env.PI_WEB_USER_DATA_ROOT = previousRoot;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const first = subject.allocateManagedSessionWorkspace("user1");
+  const second = subject.allocateManagedSessionWorkspace("user2");
+
+  assert.equal(first.userRoot, join(root, "user1"));
+  assert.equal(second.userRoot, join(root, "user2"));
+  assert.equal(subject.managedSessionFromWorkspace(first.workspace, "user2"), null);
+  assert.equal(subject.managedSessionFromWorkspace(second.workspace, "user1"), null);
+  assert.deepEqual(subject.listManagedSessionRoots("user1"), [first.sessionRoot]);
+  assert.deepEqual(subject.listManagedSessionRoots("user2"), [second.sessionRoot]);
+});

@@ -12,6 +12,8 @@ FROM node:22-bookworm-slim AS runner
 ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=30142 \
+    PI_WEB_AUTH_ENABLED=1 \
+    PI_WEB_SELF_REGISTRATION_ENABLED=1 \
     PI_CODING_AGENT_DIR=/data/pi-agent \
     PI_WEB_USER_DATA_ROOT=/data/users
 
@@ -24,6 +26,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+COPY --from=builder --chown=node:node /app/scripts/manage-web-user.mjs ./scripts/manage-web-user.mjs
 # Pi Agent loads these JSON files dynamically; Next.js standalone tracing misses them.
 COPY --from=builder --chown=node:node \
     /app/node_modules/@earendil-works/pi-coding-agent/dist/modes/interactive/theme \

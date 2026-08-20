@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { getRequestWebUser } from "@/lib/web-auth";
 import { execFile } from "child_process";
 import { promisify } from "util";
 import fs from "fs";
@@ -116,13 +117,14 @@ function listWithWalk(cwd: string): FileListing {
 // Guarded by the same allow-list as /api/files.
 export async function GET(req: NextRequest) {
   try {
+    const user = getRequestWebUser(req);
     const cwd = req.nextUrl.searchParams.get("cwd")?.trim() ?? "";
     if (!cwd || (!cwd.startsWith("/") && !isWindowsAbsolutePath(cwd))) {
       return NextResponse.json({ error: "cwd must be an absolute path" }, { status: 400 });
     }
     const query = req.nextUrl.searchParams.get("q")?.slice(0, MAX_QUERY_LENGTH) ?? "";
 
-    const allowedRoots = await getAllowedFileRoots();
+    const allowedRoots = await getAllowedFileRoots(user.id);
     if (!isFilePathAllowed(cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }

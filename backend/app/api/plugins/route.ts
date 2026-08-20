@@ -10,6 +10,7 @@ import {
   type ResolvedResource,
 } from "@earendil-works/pi-coding-agent";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
+import { getRequestWebUser } from "@/lib/web-auth";
 import type {
   PluginDiagnostic,
   PluginPackageInfo,
@@ -273,7 +274,8 @@ export async function GET(req: Request) {
   if (!cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
 
   try {
-    const allowedRoots = await getAllowedFileRoots();
+    const user = getRequestWebUser(req);
+    const allowedRoots = await getAllowedFileRoots(user.id);
     if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }
@@ -286,6 +288,7 @@ export async function GET(req: Request) {
 // POST /api/plugins body: { action, source?, scope?, cwd }
 export async function POST(req: Request) {
   try {
+    const user = getRequestWebUser(req);
     const body = await req.json() as {
       action?: PluginAction;
       source?: string;
@@ -294,7 +297,7 @@ export async function POST(req: Request) {
     };
     if (!body.cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
     if (!body.action) return NextResponse.json({ error: "action required" }, { status: 400 });
-    const allowedRoots = await getAllowedFileRoots();
+    const allowedRoots = await getAllowedFileRoots(user.id);
     if (!isExistingFilePathAllowed(body.cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }

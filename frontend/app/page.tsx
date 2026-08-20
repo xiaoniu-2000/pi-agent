@@ -1,12 +1,12 @@
 import { Suspense } from "react";
-import { AppShell } from "@/components/AppShell";
+import { AuthenticatedApp } from "@/components/AuthenticatedApp";
 import { ApiRuntimeBootstrap } from "@/components/ApiRuntimeBootstrap";
 
 export default function Home() {
   return (
     <ApiRuntimeBootstrap>
       <Suspense>
-        <AppShell />
+        <AuthenticatedApp />
       </Suspense>
     </ApiRuntimeBootstrap>
   );

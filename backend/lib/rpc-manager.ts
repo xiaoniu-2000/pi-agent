@@ -7,6 +7,7 @@ import { allowFileRoot } from "./allowed-roots";
 import {
   allocateManagedSessionWorkspace,
   copyManagedWorkspace,
+  getManagedUserId,
   managedSessionFromFile,
   managedSessionFromWorkspace,
   removeManagedSessionRoot,
@@ -146,7 +147,11 @@ export class AgentSessionWrapper {
   private _alive = true;
   private artifactSnapshot: WorkspaceArtifactSnapshot | null = null;
 
-  constructor(public readonly inner: AgentSessionLike, private readonly cwd: string) {}
+  constructor(
+    public readonly inner: AgentSessionLike,
+    private readonly cwd: string,
+    public readonly userId: string,
+  ) {}
 
   get sessionId(): string {
     return this.inner.sessionId;
@@ -172,15 +177,15 @@ export class AgentSessionWrapper {
       }
       if (event.type === "agent_end") {
         this.publishChangedArtifacts();
-        invalidateSessionListCache();
+        invalidateSessionListCache(this.userId);
       }
       this.emit(event);
       // Streaming / compaction / tool events flow through here; re-broadcast
       // the running-status snapshot so the sidebar can update live.
-      notifyRunningChange();
+      notifyRunningChange(this.userId);
     });
     this.resetIdleTimer();
-    notifyRunningChange();
+    notifyRunningChange(this.userId);
   }
 
   setForceEmptySystemPrompt(force: boolean): void {
@@ -271,7 +276,7 @@ export class AgentSessionWrapper {
     try {
       return await operation();
     } finally {
-      notifyRunningChange();
+      notifyRunningChange(this.userId);
     }
   }
 
@@ -290,7 +295,7 @@ export class AgentSessionWrapper {
   }
 
   private beginArtifactTracking(): void {
-    if (process.env.PI_WEB_AUTO_PUBLISH === "0" || !managedSessionFromWorkspace(this.cwd)) {
+    if (process.env.PI_WEB_AUTO_PUBLISH === "0" || !managedSessionFromWorkspace(this.cwd, this.userId)) {
       this.artifactSnapshot = null;
       return;
     }
@@ -353,7 +358,7 @@ export class AgentSessionWrapper {
     // A leading shell command has no assistant message, so mark this SDK
     // manager as flushed after writing its own generated entries.
     (manager as unknown as { flushed: boolean }).flushed = true;
-    cacheSessionPath(this.inner.sessionId, sessionFile);
+    cacheSessionPath(this.inner.sessionId, sessionFile, this.userId);
   }
 
   onEvent(listener: EventListener): () => void {
@@ -388,7 +393,7 @@ export class AgentSessionWrapper {
         const promptImages = command.images as Array<{ type: "image"; data: string; mimeType: string }> | undefined;
         const streamingBehavior = command.streamingBehavior as "steer" | "followUp" | undefined;
         this.promptRunning = true;
-        notifyRunningChange();
+        notifyRunningChange(this.userId);
         this.inner.prompt(command.message as string, {
           ...(promptImages?.length ? { images: promptImages } : {}),
           ...(streamingBehavior ? { streamingBehavior } : {}),
@@ -396,16 +401,16 @@ export class AgentSessionWrapper {
         }).then(() => {
           this.promptRunning = false;
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
-          notifyRunningChange();
+          notifyRunningChange(this.userId);
         }).catch((error) => {
           this.promptRunning = false;
-          invalidateSessionListCache();
+          invalidateSessionListCache(this.userId);
           this.emit({
             type: "prompt_error",
             errorMessage: error instanceof Error ? error.message : String(error),
           });
           if (!streamingBehavior) this.emit({ type: "prompt_done" });
-          notifyRunningChange();
+          notifyRunningChange(this.userId);
         });
         return null;
       }
@@ -453,7 +458,7 @@ export class AgentSessionWrapper {
         if (!model) throw new Error(`Model not found: ${provider}/${modelId}`);
         await this.inner.setModel(model);
         invalidateModelsCache();
-        invalidateSessionListCache();
+        invalidateSessionListCache(this.userId);
         return { id: model.id, provider: model.provider };
       }
 
@@ -471,8 +476,8 @@ export class AgentSessionWrapper {
         const entry = sessionManager.getEntry(entryId);
         if (!entry) throw new Error("Invalid entry ID for forking");
 
-        if (managedSessionFromFile(currentSessionFile)) {
-          const target = allocateManagedSessionWorkspace();
+        if (managedSessionFromFile(currentSessionFile, this.userId)) {
+          const target = allocateManagedSessionWorkspace(this.userId);
           let temporaryForkFile: string | undefined;
           try {
             copyManagedWorkspace(sessionManager.getCwd(), target.workspace);
@@ -533,9 +538,9 @@ export class AgentSessionWrapper {
             if (temporaryForkFile && existsSync(temporaryForkFile)) {
               unlinkSync(temporaryForkFile);
             }
-            allowFileRoot(target.workspace);
-            cacheSessionPath(target.sessionId, newSessionFile);
-            invalidateSessionListCache();
+            allowFileRoot(target.workspace, this.userId);
+            cacheSessionPath(target.sessionId, newSessionFile, this.userId);
+            invalidateSessionListCache(this.userId);
             this.destroy();
             return { cancelled: false, newSessionId: target.sessionId };
           } catch (error) {
@@ -564,8 +569,8 @@ export class AgentSessionWrapper {
         }
 
         const newSessionId = SessionManager.open(newSessionFile, sessionDir).getSessionId();
-        cacheSessionPath(newSessionId, newSessionFile);
-        invalidateSessionListCache();
+        cacheSessionPath(newSessionId, newSessionFile, this.userId);
+        invalidateSessionListCache(this.userId);
         this.destroy();
         return { cancelled: false, newSessionId };
       }
@@ -587,7 +592,7 @@ export class AgentSessionWrapper {
         if (level === "xhigh" && (this.inner.model as { compat?: { thinkingFormat?: string } } | null)?.compat?.thinkingFormat === "deepseek" && this.inner.agent?.state) {
           this.inner.agent.state.thinkingLevel = "xhigh";
         }
-        invalidateSessionListCache();
+        invalidateSessionListCache(this.userId);
         return null;
       }
 
@@ -597,7 +602,7 @@ export class AgentSessionWrapper {
             this.inner.compact(command.customInstructions as string | undefined)
           );
         } finally {
-          invalidateSessionListCache();
+          invalidateSessionListCache(this.userId);
         }
       }
 
@@ -605,7 +610,7 @@ export class AgentSessionWrapper {
         const name = (command.name as string | undefined)?.trim();
         if (!name) throw new Error("Session name cannot be empty");
         this.inner.setSessionName(name);
-        invalidateSessionListCache();
+        invalidateSessionListCache(this.userId);
         return null;
       }
 
@@ -731,14 +736,14 @@ export class AgentSessionWrapper {
           undefined,
           { excludeFromContext: command.excludeFromContext as boolean | undefined },
         );
-        notifyRunningChange();
+        notifyRunningChange(this.userId);
         try {
           const result = await execution;
           this.persistBashOnlySession();
           return result;
         } finally {
-          invalidateSessionListCache();
-          notifyRunningChange();
+          invalidateSessionListCache(this.userId);
+          notifyRunningChange(this.userId);
         }
       }
 
@@ -763,7 +768,7 @@ export class AgentSessionWrapper {
     this.pendingUiResponses.clear();
     this.pendingUiRequests.clear();
     this.onDestroyCallback?.();
-    notifyRunningChange();
+    notifyRunningChange(this.userId);
   }
 
   private resolveExtensionUiResponse(response: ExtensionUiResponse): void {
@@ -1106,7 +1111,12 @@ export class AgentSessionWrapper {
 declare global {
   var __piSessions: Map<string, AgentSessionWrapper> | undefined;
   var __piStartLocks: Map<string, Promise<{ session: AgentSessionWrapper; realSessionId: string }>> | undefined;
-  var __piRunningListeners: Set<(ids: string[]) => void> | undefined;
+  var __piRunningListenersByUser: Map<string, Set<(ids: string[]) => void>> | undefined;
+  var __piRunningSnapshotsByUser: Map<string, string> | undefined;
+}
+
+function registryKey(userId: string, sessionId: string): string {
+  return `${userId}\n${sessionId}`;
 }
 
 function getRegistry(): Map<string, AgentSessionWrapper> {
@@ -1125,14 +1135,16 @@ function getLocks(): Map<string, Promise<{ session: AgentSessionWrapper; realSes
   return globalThis.__piStartLocks;
 }
 
-export function getRpcSession(sessionId: string): AgentSessionWrapper | undefined {
-  return getRegistry().get(sessionId);
+export function getRpcSession(sessionId: string, authenticatedUserId?: string): AgentSessionWrapper | undefined {
+  const userId = getManagedUserId(authenticatedUserId);
+  return getRegistry().get(registryKey(userId, sessionId));
 }
 
-export function getRunningRpcSessionIds(): string[] {
+export function getRunningRpcSessionIds(authenticatedUserId?: string): string[] {
+  const userId = getManagedUserId(authenticatedUserId);
   const ids = new Set<string>();
-  for (const [sessionId, session] of getRegistry()) {
-    if (session.isRunning()) ids.add(session.sessionId || sessionId);
+  for (const session of getRegistry().values()) {
+    if (session.userId === userId && session.isRunning()) ids.add(session.sessionId);
   }
   return [...ids];
 }
@@ -1146,30 +1158,35 @@ export function getRunningRpcSessionIds(): string[] {
 // survive Next.js hot-reload.
 // ----------------------------------------------------------------------------
 
-function getRunningListeners(): Set<(ids: string[]) => void> {
-  if (!globalThis.__piRunningListeners) globalThis.__piRunningListeners = new Set();
-  return globalThis.__piRunningListeners;
+function getRunningListeners(userId: string): Set<(ids: string[]) => void> {
+  if (!globalThis.__piRunningListenersByUser) globalThis.__piRunningListenersByUser = new Map();
+  let listeners = globalThis.__piRunningListenersByUser.get(userId);
+  if (!listeners) {
+    listeners = new Set();
+    globalThis.__piRunningListenersByUser.set(userId, listeners);
+  }
+  return listeners;
 }
 
 /** Subscribe to running-session-id changes. Returns an unsubscribe function. */
-export function subscribeRunningSessions(listener: (ids: string[]) => void): () => void {
-  const listeners = getRunningListeners();
+export function subscribeRunningSessions(userId: string, listener: (ids: string[]) => void): () => void {
+  const listeners = getRunningListeners(getManagedUserId(userId));
   listeners.add(listener);
   return () => { listeners.delete(listener); };
 }
-
-let lastRunningSnapshot = "";
 
 /**
  * Recompute the running-session-id set and, if it changed since the last
  * notification, broadcast it to subscribers. Cheap to call often.
  */
-export function notifyRunningChange(): void {
-  const ids = getRunningRpcSessionIds();
+export function notifyRunningChange(authenticatedUserId: string): void {
+  const userId = getManagedUserId(authenticatedUserId);
+  const ids = getRunningRpcSessionIds(userId);
   const snapshot = JSON.stringify([...ids].sort());
-  if (snapshot === lastRunningSnapshot) return;
-  lastRunningSnapshot = snapshot;
-  for (const listener of getRunningListeners()) {
+  if (!globalThis.__piRunningSnapshotsByUser) globalThis.__piRunningSnapshotsByUser = new Map();
+  if (snapshot === globalThis.__piRunningSnapshotsByUser.get(userId)) return;
+  globalThis.__piRunningSnapshotsByUser.set(userId, snapshot);
+  for (const listener of getRunningListeners(userId)) {
     try { listener(ids); } catch { /* ignore listener errors */ }
   }
 }
@@ -1185,14 +1202,17 @@ export async function startRpcSession(
   cwd: string,
   toolNames?: string[],
   newSession?: { sessionDir: string; sessionId: string },
+  authenticatedUserId?: string,
 ): Promise<{ session: AgentSessionWrapper; realSessionId: string }> {
   const registry = getRegistry();
   const locks = getLocks();
+  const userId = getManagedUserId(authenticatedUserId);
+  const requestedKey = registryKey(userId, sessionId);
 
-  const existing = registry.get(sessionId);
+  const existing = registry.get(requestedKey);
   if (existing?.isAlive()) return { session: existing, realSessionId: sessionId };
 
-  const inflight = locks.get(sessionId);
+  const inflight = locks.get(requestedKey);
   if (inflight) return inflight;
 
   const starting = (async () => {
@@ -1238,7 +1258,7 @@ export async function startRpcSession(
       inner.setActiveToolsByName(withExtensionTools(inner, toolNames));
     }
 
-    const wrapper = new AgentSessionWrapper(inner, cwd);
+    const wrapper = new AgentSessionWrapper(inner, cwd, userId);
     // When all tools are disabled, clear the system prompt entirely.
     // pi's buildSystemPrompt always produces a non-empty prompt even with no tools;
     // keep this forced after extension resource discovery and reloads as well.
@@ -1249,15 +1269,16 @@ export async function startRpcSession(
 
     const realSessionId = inner.sessionId as string;
     const realSessionFile = inner.sessionFile as string | undefined;
-    if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile);
+    if (realSessionFile) cacheSessionPath(realSessionId, realSessionFile, userId);
 
-    wrapper.onDestroy(() => registry.delete(realSessionId));
-    registry.set(realSessionId, wrapper);
+    const realKey = registryKey(userId, realSessionId);
+    wrapper.onDestroy(() => registry.delete(realKey));
+    registry.set(realKey, wrapper);
     wrapper.beginExtensionBinding({ forceEmptySystemPrompt: toolNames?.length === 0 });
 
     return { session: wrapper, realSessionId };
-  })().finally(() => locks.delete(sessionId));
+  })().finally(() => locks.delete(requestedKey));
 
-  locks.set(sessionId, starting);
+  locks.set(requestedKey, starting);
   return starting;
 }

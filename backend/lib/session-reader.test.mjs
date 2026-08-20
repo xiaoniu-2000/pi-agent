@@ -336,6 +336,7 @@ test("keeps forward and reverse session path caches in sync", async () => {
     invalidateSessionPathCache(sessionId);
   }
 
-  assert.equal(globalThis.__piSessionPathCache?.has(sessionId), false);
-  assert.equal(globalThis.__piPathToSessionIdCache?.has(sessionPathKey(filePath)), false);
+  const cache = globalThis.__piUserSessionCaches?.get("__legacy__");
+  assert.equal(cache?.pathCache.has(sessionId), false);
+  assert.equal(cache?.pathToSessionIdCache.has(sessionPathKey(filePath)), false);
 });

@@ -15,9 +15,9 @@ mkdir -p "$WEBAPP_DIR/WEB-INF"
 cp -R "$FRONTEND_DIR/out/." "$WEBAPP_DIR/"
 cp "$FRONTEND_DIR/tomcat/WEB-INF/web.xml" "$WEBAPP_DIR/WEB-INF/web.xml"
 
-# Let an offline bundle carry the final browser-visible backend URL without
-# editing source files. The public config remains the local-development default
-# when PI_WEB_API_BASE_URL is not supplied.
+# The default config automatically uses the page hostname with backend port
+# 30142. Keep this override only for deployments where the API uses another
+# hostname or port; the login page never asks end users for a backend address.
 if [ -n "${PI_WEB_API_BASE_URL:-}" ]; then
   API_BASE_URL_JSON=$(node -p 'JSON.stringify(process.env.PI_WEB_API_BASE_URL)')
   printf 'window.PI_WEB_CONFIG = { apiBaseUrl: %s };\n' "$API_BASE_URL_JSON" \

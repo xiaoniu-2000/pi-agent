@@ -10,6 +10,8 @@
     "build": "npm run build -w frontend && npm run build -w backend",
     "build:backend-release": "sh scripts/build-backend-release.sh",
     "build:offline": "sh scripts/build-offline-bundle.sh",
+    "user:list": "node backend/scripts/manage-web-user.mjs list",
+    "user:set": "node backend/scripts/manage-web-user.mjs set",
     "typecheck": "npm run typecheck -w frontend && npm run typecheck -w backend",
     "test": "npm run test -w frontend && npm run test -w backend"
   },

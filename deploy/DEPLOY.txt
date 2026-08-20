@@ -1,11 +1,16 @@
 1. Copy .env.example to .env. Keep PI_WEB_BACKEND_IMAGE unchanged and set
-   PI_WEB_CORS_ORIGINS to the exact Tomcat origin.
+   PI_WEB_CORS_ORIGINS to the exact Tomcat origin. Keep
+   PI_WEB_SELF_REGISTRATION_ENABLED=1 to allow normal users to sign up.
 2. Make runtime/pi-agent and runtime/user-data writable by container UID 1000.
 3. Run: docker load -i pi-agent-backend-<version>.tar
-4. Run: docker compose up -d
+4. Create the first account (using user1 preserves existing user1 history):
+   docker compose run --rm backend node scripts/manage-web-user.mjs set user1 --admin
+   Without Compose: sh run-backend.sh manage-user set user1 --admin
+   Browser sign-ups after this step are always normal users; user1 stays admin.
+5. Run: docker compose up -d
    If the Docker Compose plugin is unavailable, run: sh run-backend.sh
-5. Copy ROOT.war to Tomcat webapps and restart Tomcat.
-6. Check: curl http://127.0.0.1:30142/api/health
+6. Copy ROOT.war to Tomcat webapps and restart Tomcat.
+7. Check: curl http://127.0.0.1:30142/api/health
 
 The server does not need Node.js, npm or Git. npm was used on the build machine;
 the backend runs with Node.js inside its Docker image.

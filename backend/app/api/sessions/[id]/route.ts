@@ -17,6 +17,7 @@ import {
   managedSessionFromFile,
   removeManagedSessionRoot,
 } from "@/lib/managed-session-workspace";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 // BranchNavigator still traverses recursively, so keep the response tree shallow.
 const MAX_PROJECTED_TREE_DEPTH = 200;
@@ -124,7 +125,8 @@ export async function GET(
 ) {
   const { id } = await params;
   try {
-    const filePath = await resolveSessionPath(id);
+    const user = getRequestWebUser(req);
+    const filePath = await resolveSessionPath(id, user.id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
@@ -142,7 +144,7 @@ export async function GET(
     let modified = header?.timestamp ?? new Date().toISOString();
     try { modified = statSync(filePath).mtime.toISOString(); } catch { /* use header timestamp */ }
     const parentSessionId = header?.parentSession
-      ? await resolveSessionIdByPath(header.parentSession)
+      ? await resolveSessionIdByPath(header.parentSession, user.id)
       : undefined;
     const info = header ? {
       path: filePath,
@@ -182,17 +184,18 @@ export async function PATCH(
 ) {
   const { id } = await params;
   try {
+    const user = getRequestWebUser(req);
     const { name } = await req.json() as { name?: string };
     if (typeof name !== "string") {
       return NextResponse.json({ error: "name is required" }, { status: 400 });
     }
-    const filePath = await resolveSessionPath(id);
+    const filePath = await resolveSessionPath(id, user.id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
     const sm = SessionManager.open(filePath);
     sm.appendSessionInfo(name.trim());
-    invalidateSessionListCache();
+    invalidateSessionListCache(user.id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
@@ -201,12 +204,13 @@ export async function PATCH(
 
 // DELETE /api/sessions/[id]
 export async function DELETE(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
   try {
-    const filePath = await resolveSessionPath(id);
+    const user = getRequestWebUser(req);
+    const filePath = await resolveSessionPath(id, user.id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
@@ -219,10 +223,10 @@ export async function DELETE(
     // belonging to the fixed user instead of only JSONL siblings.
     const targetPathKey = sessionPathKey(filePath);
     const dir = dirname(filePath);
-    const managedPaths = managedSessionFromFile(filePath);
+    const managedPaths = managedSessionFromFile(filePath, user.id);
     try {
       const childCandidates = managedPaths
-        ? listManagedSessionFiles().filter((candidate) => sessionPathKey(candidate) !== targetPathKey)
+        ? listManagedSessionFiles(user.id).filter((candidate) => sessionPathKey(candidate) !== targetPathKey)
         : readdirSync(dir)
             .filter((file) => file.endsWith(".jsonl") && sessionPathKey(join(dir, file)) !== targetPathKey)
             .map((file) => join(dir, file));
@@ -245,14 +249,14 @@ export async function DELETE(
       }
     } catch { /* skip if dir unreadable */ }
 
-    getRpcSession(id)?.destroy();
+    getRpcSession(id, user.id)?.destroy();
     if (managedPaths) {
       removeManagedSessionRoot(managedPaths);
     } else {
       unlinkSync(filePath);
     }
-    invalidateSessionPathCache(id);
-    invalidateSessionListCache();
+    invalidateSessionPathCache(id, user.id);
+    invalidateSessionListCache(user.id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json({ error: String(error) }, { status: 500 });

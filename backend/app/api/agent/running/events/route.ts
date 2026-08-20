@@ -1,4 +1,5 @@
 import { getRunningRpcSessionIds, subscribeRunningSessions } from "@/lib/rpc-manager";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -6,6 +7,7 @@ export const dynamic = "force-dynamic";
 // session ids. Pushes an update whenever any session starts or stops working,
 // so the sidebar never has to poll.
 export async function GET(req: Request) {
+  const user = getRequestWebUser(req);
   const stream = new ReadableStream({
     start(controller) {
       const encode = (data: unknown) => {
@@ -15,7 +17,7 @@ export async function GET(req: Request) {
 
       // Subscribe BEFORE taking the initial snapshot so no state change can slip
       // through the gap between snapshot and subscription.
-      const unsubscribe = subscribeRunningSessions((ids) => {
+      const unsubscribe = subscribeRunningSessions(user.id, (ids) => {
         try {
           encode({ type: "running", runningSessionIds: ids });
         } catch {
@@ -25,7 +27,7 @@ export async function GET(req: Request) {
 
       // Initial snapshot so the client renders the correct state immediately.
       // (A duplicate frame here is harmless: the client just sets the same set.)
-      encode({ type: "running", runningSessionIds: getRunningRpcSessionIds() });
+      encode({ type: "running", runningSessionIds: getRunningRpcSessionIds(user.id) });
 
       // Heartbeat to keep the connection alive through proxies/timeouts.
       const heartbeat = setInterval(() => {

@@ -77,10 +77,10 @@ function inferRemovedWorktree(cwd: string): ProjectInfo | null {
   return { projectRoot: repoRoot, branch: basename(cwd), isWorktree: true, isTopLevel: true };
 }
 
-export async function resolveProject(cwd: string): Promise<ProjectInfo> {
-  if (managedSessionFromWorkspace(cwd)) {
+export async function resolveProject(cwd: string, userId?: string): Promise<ProjectInfo> {
+  if (managedSessionFromWorkspace(cwd, userId)) {
     return {
-      projectRoot: getManagedUserRoot(),
+      projectRoot: getManagedUserRoot(userId),
       branch: null,
       isWorktree: false,
       isTopLevel: false,
@@ -183,7 +183,7 @@ function sanitizeBranchForDir(branch: string): string {
   return branch.replace(/[\/\\:*?"<>|\s]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
-export async function addWorktree(cwd: string, branch: string): Promise<{ path: string; branch: string }> {
+export async function addWorktree(cwd: string, branch: string, userId?: string): Promise<{ path: string; branch: string }> {
   const trimmed = branch.trim();
   if (!trimmed) throw new Error("Branch name is required");
 
@@ -217,7 +217,7 @@ export async function addWorktree(cwd: string, branch: string): Promise<{ path: 
     throw new Error(extractGitError(error));
   }
 
-  allowFileRoot(worktreePath);
+  allowFileRoot(worktreePath, userId);
   invalidateProjectCache();
   return { path: worktreePath, branch: trimmed };
 }

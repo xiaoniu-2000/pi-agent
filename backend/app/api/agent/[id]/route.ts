@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { resolveSessionPath } from "@/lib/session-reader";
 import { startRpcSession, getRpcSession } from "@/lib/rpc-manager";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 // POST /api/agent/[id] - Send a command to an existing session
 export async function POST(
@@ -11,23 +12,24 @@ export async function POST(
   const { id } = await params;
 
   try {
+    const user = getRequestWebUser(req);
     const body = await req.json() as { type: string; [key: string]: unknown };
 
     // Fast path: already-running session
-    const existing = getRpcSession(id);
+    const existing = getRpcSession(id, user.id);
     if (existing?.isAlive()) {
       const result = await existing.send(body);
       return NextResponse.json({ success: true, data: result });
     }
 
-    const filePath = await resolveSessionPath(id);
+    const filePath = await resolveSessionPath(id, user.id);
     if (!filePath) {
       return NextResponse.json({ error: "Session not found" }, { status: 404 });
     }
 
     const cwd = SessionManager.open(filePath).getHeader()?.cwd ?? process.cwd();
 
-    const { session } = await startRpcSession(id, filePath, cwd);
+    const { session } = await startRpcSession(id, filePath, cwd, undefined, undefined, user.id);
     const result = await session.send(body);
 
     return NextResponse.json({ success: true, data: result });
@@ -38,13 +40,14 @@ export async function POST(
 
 // GET /api/agent/[id] - Get current agent state
 export async function GET(
-  _req: Request,
+  req: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
 
   try {
-    const session = getRpcSession(id);
+    const user = getRequestWebUser(req);
+    const session = getRpcSession(id, user.id);
     if (!session || !session.isAlive()) {
       return NextResponse.json({ running: false });
     }

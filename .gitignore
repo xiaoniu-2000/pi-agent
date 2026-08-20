@@ -23,6 +23,7 @@ extensions/python_sandbox/*
 
 #Logs and test output
 *.log
+!version-function.log
 coverage/
 
 #Local env files

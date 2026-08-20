@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionEntries, resolveSessionPath } from "@/lib/session-reader";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 export async function GET(
   req: Request,
@@ -13,7 +14,8 @@ export async function GET(
   }
 
   try {
-    const filePath = await resolveSessionPath(id);
+    const user = getRequestWebUser(req);
+    const filePath = await resolveSessionPath(id, user.id);
     if (!filePath) return NextResponse.json({ error: "Session not found" }, { status: 404 });
 
     // SessionManager-backed parsing preserves the SDK's malformed-line tolerance.

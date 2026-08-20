@@ -26,6 +26,7 @@ import {
   validateUploadFileNames,
 } from "@/lib/file-upload";
 import { parseFormDataWithinLimit, RequestBodyTooLargeError } from "@/lib/bounded-form-data";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 const IGNORED_NAMES = new Set([
   "node_modules", ".git", ".next", "dist", "build", "__pycache__",
@@ -79,11 +80,11 @@ function parseFileRequestType(value: string): FileRequestType | null {
   return FILE_REQUEST_TYPE_SET.has(value) ? (value as FileRequestType) : null;
 }
 
-async function getUploadDirectory(segments: string[]): Promise<
+async function getUploadDirectory(segments: string[], userId: string): Promise<
   { directory: string } | { response: NextResponse }
 > {
   const directory = filePathFromSegments(segments);
-  const allowedRoots = await getAllowedFileRoots();
+  const allowedRoots = await getAllowedFileRoots(userId);
   if (!isFilePathAllowed(directory, allowedRoots)) {
     return { response: NextResponse.json({ error: "Access denied" }, { status: 403 }) };
   }
@@ -126,8 +127,9 @@ export async function POST(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   try {
+    const user = getRequestWebUser(request);
     const { path: segments } = await params;
-    const uploadDirectory = await getUploadDirectory(segments);
+    const uploadDirectory = await getUploadDirectory(segments, user.id);
     if ("response" in uploadDirectory) return uploadDirectory.response;
     const { directory } = uploadDirectory;
     const type = request.nextUrl.searchParams.get("type") ?? "upload";
@@ -411,6 +413,7 @@ export async function GET(
   { params }: { params: Promise<{ path: string[] }> }
 ) {
   try {
+    const user = getRequestWebUser(request);
     const { path: segments } = await params;
     const filePath = filePathFromSegments(segments);
     const rawType = request.nextUrl.searchParams.get("type") ?? "list";
@@ -420,12 +423,12 @@ export async function GET(
     }
     const sessionId = request.nextUrl.searchParams.get("sessionId");
 
-    const allowedRoots = await getAllowedFileRoots();
+    const allowedRoots = await getAllowedFileRoots(user.id);
     const allowedByRoot = isFilePathAllowed(filePath, allowedRoots);
     const allowedBySessionReference =
       !allowedByRoot &&
       type !== "list" &&
-      await isFilePathReferencedBySession(filePath, sessionId);
+      await isFilePathReferencedBySession(filePath, sessionId, user.id);
     if (!allowedByRoot && !allowedBySessionReference) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }

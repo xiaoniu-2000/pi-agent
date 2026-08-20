@@ -3,11 +3,13 @@ import type { SkillInstallScope } from "@/lib/api-types";
 import { checkSkillUpdates } from "@/lib/skill-updates";
 import { loadSkillsWithInstallInfo } from "@/lib/skills-service";
 import { getAllowedFileRoots, isExistingFilePathAllowed } from "@/lib/file-access";
+import { getRequestWebUser } from "@/lib/web-auth";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
   try {
+    const user = getRequestWebUser(req);
     const body = await req.json() as {
       cwd?: unknown;
       package?: unknown;
@@ -15,7 +17,7 @@ export async function POST(req: Request) {
     };
     const cwd = typeof body.cwd === "string" ? body.cwd : "";
     if (!cwd) return NextResponse.json({ error: "cwd required" }, { status: 400 });
-    const allowedRoots = await getAllowedFileRoots();
+    const allowedRoots = await getAllowedFileRoots(user.id);
     if (!isExistingFilePathAllowed(cwd, allowedRoots)) {
       return NextResponse.json({ error: "Access denied" }, { status: 403 });
     }

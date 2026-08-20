@@ -8,12 +8,14 @@ import {
   isManagedSessionMode,
   managedSessionFromWorkspace,
 } from "@/lib/managed-session-workspace";
+import { getRequestWebUser } from "@/lib/web-auth";
 // POST /api/agent/new  body: { cwd: string; type: string; message?: string; ... }
 // Spawns a brand-new pi session. Most calls immediately send the first command;
 // type:"ensure_session" only creates the runtime so clients can query commands.
 // Returns { sessionId, data } where sessionId is pi's real session id.
 export async function POST(req: Request) {
   try {
+    const user = getRequestWebUser(req);
     const body = await req.json() as { cwd?: string; [key: string]: unknown };
     const { cwd, ...command } = body;
 
@@ -23,7 +25,7 @@ export async function POST(req: Request) {
     if (!existsSync(cwd)) {
       return NextResponse.json({ error: `Directory does not exist: ${cwd}` }, { status: 400 });
     }
-    const managedPaths = managedSessionFromWorkspace(cwd);
+    const managedPaths = managedSessionFromWorkspace(cwd, user.id);
     if (isManagedSessionMode() && !managedPaths) {
       return NextResponse.json(
         { error: "cwd is not an allocated workspace for the current user" },
@@ -46,13 +48,14 @@ export async function POST(req: Request) {
       managedPaths
         ? { sessionDir: managedPaths.sessionRoot, sessionId: managedPaths.sessionId }
         : undefined,
+      user.id,
     );
 
     // Keep the files-route allowed-roots cache (see app/api/files/[...path]/route.ts)
     // in sync so the new cwd is immediately readable via /api/files. Without this,
     // a file request under a brand-new cwd would 403 for up to the cache TTL.
-    allowFileRoot(cwd);
-    invalidateSessionListCache();
+    allowFileRoot(cwd, user.id);
+    invalidateSessionListCache(user.id);
 
     // Apply pre-selected model before sending the prompt
     if (provider && modelId) {
